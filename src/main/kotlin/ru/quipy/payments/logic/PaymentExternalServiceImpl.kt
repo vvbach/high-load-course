@@ -69,7 +69,7 @@ class PaymentExternalSystemAdapterImpl(
             paymentESService.update(paymentId) {
                 it.logProcessing(false, now(), transactionId, reason = "Rejected: cannot finish before deadline")
             }
-            paymentMetric.failed()
+            paymentMetric.cancel()
             return
         }
 
@@ -84,7 +84,7 @@ class PaymentExternalSystemAdapterImpl(
                 paymentESService.update(paymentId) {
                     it.logProcessing(false, now(), transactionId, reason = "Rejected: cannot finish before deadline")
                 }
-                paymentMetric.failed()
+                paymentMetric.cancel()
                 semaphore.release()
                 return
             }
@@ -102,14 +102,10 @@ class PaymentExternalSystemAdapterImpl(
                     ExternalSysResponse(transactionId.toString(), paymentId.toString(), false, e.message)
                 }
 
-                if (body.result) {
-                    paymentMetric.success()
-                } else {
-                    paymentMetric.failed()
-                }
 
                 logger.warn("[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, succeeded: ${body.result}, message: ${body.message}")
 
+                paymentMetric.success()
                 // Здесь мы обновляем состояние оплаты в зависимости от результата в базе данных оплат.
                 // Это требуется сделать ВО ВСЕХ ИСХОДАХ (успешная оплата / неуспешная / ошибочная ситуация)
                 paymentESService.update(paymentId) {
@@ -133,7 +129,6 @@ class PaymentExternalSystemAdapterImpl(
                     }
                 }
             }
-            paymentMetric.failed()
         } finally {
             semaphore.release()
         }
@@ -147,4 +142,4 @@ class PaymentExternalSystemAdapterImpl(
 
 }
 
-public fun now() = System.currentTimeMillis()
+fun now() = System.currentTimeMillis()
