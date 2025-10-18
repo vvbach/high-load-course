@@ -14,8 +14,8 @@ class PaymentMetric(registry: MeterRegistry) {
         .description("Total number of successful payments")
         .register(registry)
 
-    private val failedCounter = Counter.builder("payments_failed_total")
-        .description("Total number of failed payments")
+    private val cancelCounter = Counter.builder("payments_cancel_total")
+        .description("Total number of canceled payments")
         .register(registry)
 
     fun incoming() {
@@ -26,7 +26,7 @@ class PaymentMetric(registry: MeterRegistry) {
         successCounter.increment()
     }
 
-    fun failed() {
-        failedCounter.increment()
+    fun cancel() {
+        cancelCounter.increment()
     }
 }

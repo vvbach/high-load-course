@@ -23,7 +23,6 @@ class PaymentExternalSystemAdapterImpl(
     private val paymentESService: EventSourcingService<UUID, PaymentAggregate, PaymentAggregateState>,
     private val paymentProviderHostPort: String,
     private val token: String,
-    registry: MeterRegistry
 ) : PaymentExternalSystemAdapter {
 
     companion object {
@@ -44,7 +43,6 @@ class PaymentExternalSystemAdapterImpl(
     // SETUP SOLUTION
     private var rateLimiter = SlidingWindowRateLimiter(rateLimitPerSec.toLong(), Duration.ofSeconds(1))
     private val semaphore = Semaphore(parallelRequests)
-    private val paymentMetric = PaymentMetric(registry)
 
     override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long) {
         logger.warn("[$accountName] Submitting payment request for payment $paymentId")
@@ -57,37 +55,12 @@ class PaymentExternalSystemAdapterImpl(
             it.logSubmission(success = true, transactionId, now(), Duration.ofMillis(now() - paymentStartedAt))
         }
 
-        paymentMetric.incoming()
-
-        val requestAverageProcessingTimeInMills = requestAverageProcessingTime.toMillis()
-        val currentReqNumber = parallelRequests - semaphore.availablePermits()
-        val estimatedWait = currentReqNumber * requestAverageProcessingTimeInMills
-        val predictedFinish = now() + estimatedWait + requestAverageProcessingTimeInMills
-
-        if (predictedFinish > deadline) {
-            logger.warn("[$accountName] Rejecting payment $paymentId early: cannot finish before deadline")
-            paymentESService.update(paymentId) {
-                it.logProcessing(false, now(), transactionId, reason = "Rejected: cannot finish before deadline")
-            }
-            paymentMetric.failed()
-            return
-        }
 
         logger.info("[$accountName] Submit: $paymentId , txId: $transactionId")
 
         try {
             semaphore.acquire()
             rateLimiter.tickBlocking()
-
-            if (now() + requestAverageProcessingTimeInMills > deadline) {
-                logger.warn("[$accountName] Rejecting payment $paymentId early: cannot finish before deadline")
-                paymentESService.update(paymentId) {
-                    it.logProcessing(false, now(), transactionId, reason = "Rejected: cannot finish before deadline")
-                }
-                paymentMetric.failed()
-                semaphore.release()
-                return
-            }
 
             val request = Request.Builder().run {
                 url("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount")
@@ -102,11 +75,6 @@ class PaymentExternalSystemAdapterImpl(
                     ExternalSysResponse(transactionId.toString(), paymentId.toString(), false, e.message)
                 }
 
-                if (body.result) {
-                    paymentMetric.success()
-                } else {
-                    paymentMetric.failed()
-                }
 
                 logger.warn("[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, succeeded: ${body.result}, message: ${body.message}")
 
@@ -133,7 +101,6 @@ class PaymentExternalSystemAdapterImpl(
                     }
                 }
             }
-            paymentMetric.failed()
         } finally {
             semaphore.release()
         }
@@ -147,4 +114,4 @@ class PaymentExternalSystemAdapterImpl(
 
 }
 
-public fun now() = System.currentTimeMillis()
+fun now() = System.currentTimeMillis()

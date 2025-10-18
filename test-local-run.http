@@ -5,11 +5,13 @@ Content-Type: application/json
 {
   "serviceName": "{{serviceName}}",
   "token": "{{token}}",
-  "ratePerSecond": 2,
-  "testCount": 500,
-  "processingTimeMillis": 60000
+  "ratePerSecond": 16,
+  "testCount": 1600,
+  "processingTimeMillis": 30000
 }
 
 ### Stop running test to save time and resources
 # @timeout 120
 POST http://localhost:1234/test/stop/{{serviceName}}
+
+accountName=acc-23, parallelRequests=64, rateLimitPerSec=11, price=30, averageProcessingTime=PT1S
