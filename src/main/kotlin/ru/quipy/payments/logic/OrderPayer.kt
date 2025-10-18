@@ -1,15 +1,19 @@
 package ru.quipy.payments.logic
 
+import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import ru.quipy.common.utils.CallerBlockingRejectedExecutionHandler
 import ru.quipy.common.utils.NamedThreadFactory
+import ru.quipy.common.utils.PaymentMetric
 import ru.quipy.core.EventSourcingService
 import ru.quipy.payments.api.PaymentAggregate
+import ru.quipy.payments.exception.TooManyRequestsException
 import java.util.*
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
@@ -30,7 +34,10 @@ class OrderPayer(
     @Autowired
     private lateinit var paymentService: PaymentService
 
-    private val queue = LinkedBlockingQueue<Runnable>(8_000)
+    private val paymentMetric= PaymentMetric(registry)
+
+    // 11 request * (30 sec waiting - 1 sec handling) + 64 parallel request = 383
+    private val queue = LinkedBlockingQueue<Runnable>(300)
 
     private val paymentExecutor = ThreadPoolExecutor(
         16,
@@ -64,9 +71,14 @@ class OrderPayer(
             paymentService.submitPaymentRequest(paymentId, amount, createdAt, deadline)
         }
 
+        paymentMetric.incoming()
+
         if (!queue.offer(task)){
             logger.error("Payment ${paymentId} for order $orderId rejected because the queue is full!")
+            paymentMetric.cancel()
+            throw TooManyRequestsException("Too many payment requests")
         } else {
+            paymentMetric.success()
             paymentExecutor.execute(task)
         }
         return createdAt
