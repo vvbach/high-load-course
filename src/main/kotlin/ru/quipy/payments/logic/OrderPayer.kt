@@ -6,18 +6,18 @@ import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
-import ru.quipy.common.utils.CallerBlockingRejectedExecutionHandler
-import ru.quipy.common.utils.NamedThreadFactory
-import ru.quipy.common.utils.PaymentMetric
+import ru.quipy.common.utils.*
 import ru.quipy.core.EventSourcingService
 import ru.quipy.payments.api.PaymentAggregate
 import ru.quipy.payments.exception.TooManyRequestsException
+import ru.quipy.payments.logic.PaymentExternalSystemAdapterImpl.Companion
+import java.time.Duration
 import java.util.*
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 @Service
 class OrderPayer(
@@ -34,7 +34,19 @@ class OrderPayer(
     @Autowired
     private lateinit var paymentService: PaymentService
 
-    private val paymentMetric= PaymentMetric(registry)
+    private val incomingCounter = Counter.builder("payments_incoming_total")
+        .description("Total number of incoming payment requests")
+        .register(registry)
+
+    private val cancelCounter = Counter.builder("payments_cancel_total")
+        .description("Total number of canceled payments")
+        .register(registry)
+
+    private val leakyBucketRateLimiter = LeakingBucketRateLimiter(
+        rate = 11,
+        window = Duration.ofSeconds(1),
+        bucketSize = 300
+    )
 
     // 11 request * (30 sec waiting - 1 sec handling) + 64 parallel request = 383
     private val queue = LinkedBlockingQueue<Runnable>(300)
@@ -58,6 +70,14 @@ class OrderPayer(
     fun processPayment(orderId: UUID, amount: Int, paymentId: UUID, deadline: Long): Long {
         val createdAt = System.currentTimeMillis()
 
+        incomingCounter.increment()
+
+        if (!leakyBucketRateLimiter.tick()) {
+            logger.error("Payment $paymentId for order $orderId rejected by rate limiter!")
+            cancelCounter.increment()
+            throw TooManyRequestsException("Too many payment requests")
+        }
+
         val task = Runnable {
             val createdEvent = paymentESService.create {
                 it.create(
@@ -71,14 +91,12 @@ class OrderPayer(
             paymentService.submitPaymentRequest(paymentId, amount, createdAt, deadline)
         }
 
-        paymentMetric.incoming()
 
         if (!queue.offer(task)){
-            logger.error("Payment ${paymentId} for order $orderId rejected because the queue is full!")
-            paymentMetric.cancel()
+            logger.error("Payment $paymentId for order $orderId rejected because the queue is full!")
+            cancelCounter.increment()
             throw TooManyRequestsException("Too many payment requests")
         } else {
-            paymentMetric.success()
             paymentExecutor.execute(task)
         }
         return createdAt
