@@ -43,10 +43,6 @@ class PaymentExternalSystemAdapterImpl(
     private val client = OkHttpClient.Builder().build()
 
     // SETUP SOLUTION
-    private val rateLimiter = SlidingWindowRateLimiter(
-        rate = rateLimitPerSec.toLong(),
-        window = Duration.ofSeconds(1)
-    )
     private val semaphore = Semaphore(parallelRequests)
 
     private val successCounter = Counter.builder("payments_success_total")
@@ -72,7 +68,6 @@ class PaymentExternalSystemAdapterImpl(
         logger.info("[$accountName] Submit: $paymentId , txId: $transactionId")
 
         try {
-            rateLimiter.tickBlocking()
             semaphore.acquire()
 
             val request = Request.Builder().run {

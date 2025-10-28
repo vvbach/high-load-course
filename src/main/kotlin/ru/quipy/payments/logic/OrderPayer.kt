@@ -45,7 +45,7 @@ class OrderPayer(
     private val leakyBucketRateLimiter = LeakingBucketRateLimiter(
         rate = 11,
         window = Duration.ofSeconds(1),
-        bucketSize = 300
+        bucketSize = 11
     )
 
     // 11 request * (30 sec waiting - 1 sec handling) + 64 parallel request = 383
