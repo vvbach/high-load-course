@@ -80,7 +80,9 @@ class PaymentExternalSystemAdapterImpl(
             }.build()
 
             var retry = true
-            while (retry){
+            var retryTime = 3
+            while (retry && retryTime > 0){
+                retryTime--
                 client.newCall(request).execute().use { response ->
                     val body = try {
                         mapper.readValue(response.body?.string(), ExternalSysResponse::class.java)
