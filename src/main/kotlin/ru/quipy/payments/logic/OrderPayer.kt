@@ -42,14 +42,7 @@ class OrderPayer(
         .description("Total number of canceled payments")
         .register(registry)
 
-    private val leakyBucketRateLimiter = LeakingBucketRateLimiter(
-        rate = 11,
-        window = Duration.ofSeconds(1),
-        bucketSize = 11
-    )
-
-    // 11 request * (30 sec waiting - 1 sec handling) + 64 parallel request = 383
-    private val queue = LinkedBlockingQueue<Runnable>(300)
+    private val queue = LinkedBlockingQueue<Runnable>(8000)
 
     private val paymentExecutor = ThreadPoolExecutor(
         16,
@@ -71,12 +64,6 @@ class OrderPayer(
         val createdAt = System.currentTimeMillis()
 
         incomingCounter.increment()
-
-        if (!leakyBucketRateLimiter.tick()) {
-            logger.error("Payment $paymentId for order $orderId rejected by rate limiter!")
-            cancelCounter.increment()
-            throw TooManyRequestsException("Too many payment requests")
-        }
 
         val task = Runnable {
             val createdEvent = paymentESService.create {
