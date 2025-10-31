@@ -1,15 +1,17 @@
-### Run test locally
+### Run test 1
 POST http://localhost:1234/test/run
 Content-Type: application/json
 
 {
   "serviceName": "{{serviceName}}",
   "token": "{{token}}",
-  "ratePerSecond": 2,
-  "testCount": 500,
-  "processingTimeMillis": 60000
+  "ratePerSecond": 7,
+  "testCount": 800,
+  "processingTimeMillis": 3500
 }
 
 ### Stop running test to save time and resources
 # @timeout 120
 POST http://localhost:1234/test/stop/{{serviceName}}
+
+accountName=acc-8, parallelRequests=50, rateLimitPerSec=10, price=30, averageProcessingTime=PT0.7S, enabled=true
