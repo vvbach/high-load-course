@@ -45,11 +45,11 @@ class OrderPayer(
     private val leakyBucketRateLimiter = LeakingBucketRateLimiter(
         rate = 11,
         window = Duration.ofSeconds(1),
-        bucketSize = 300
+        bucketSize = 265
     )
 
     // 11 request * (30 sec waiting - 1 sec handling) + 64 parallel request = 383
-    private val queue = LinkedBlockingQueue<Runnable>(300)
+    private val queue = LinkedBlockingQueue<Runnable>(8000)
 
     private val paymentExecutor = ThreadPoolExecutor(
         16,

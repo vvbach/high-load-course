@@ -6,12 +6,12 @@ Content-Type: application/json
 {
   "serviceName": "{{serviceName}}",
   "token": "{{token}}",
-  "branch": "case-3",
-  "accounts": "acc-5",
-  "ratePerSecond": 2,
-  "testCount": 500,
-  "processingTimeMillis": 60000,
-  "onPremises": true
+  "branch": "case-5-test-3",
+  "accounts": "acc-23",
+  "ratePerSecond": 3,
+  "testCount": 1050,
+  "processingTimeMillis": 26000,
+  "runits": "90"
 }
 
 ### Stop running test to save credits
