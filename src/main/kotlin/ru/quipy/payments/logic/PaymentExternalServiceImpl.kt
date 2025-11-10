@@ -3,6 +3,7 @@ package ru.quipy.payments.logic
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import io.micrometer.core.instrument.Counter
+import io.micrometer.core.instrument.Timer
 import io.micrometer.core.instrument.MeterRegistry
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -15,6 +16,7 @@ import java.net.SocketTimeoutException
 import java.time.Duration
 import java.util.*
 import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
 
 
 // Advice: always treat time as a Duration
@@ -39,7 +41,10 @@ class PaymentExternalSystemAdapterImpl(
     private val rateLimitPerSec = properties.rateLimitPerSec
     private val parallelRequests = properties.parallelRequests
 
-    private val client = OkHttpClient.Builder().build()
+    private val client = OkHttpClient.Builder()
+        .callTimeout(Duration.ofMillis(requestAverageProcessingTime.toMillis() + 100))
+        .retryOnConnectionFailure(true)
+        .build()
 
     // SETUP SOLUTION
     private val rateLimiter = SlidingWindowRateLimiter(
@@ -56,6 +61,17 @@ class PaymentExternalSystemAdapterImpl(
         .description("Total number of failed payments")
         .register(registry)
 
+    private val retryCounter = Counter.builder("payments_retry_total")
+        .description("Total number of retry")
+        .register(registry)
+
+    private val requestLatency = Timer.builder("requests_latency")
+        .description("Request latency in seconds.")
+        .publishPercentiles(0.5, 0.8, 0.99)
+        .tags("component", "payment")
+        .register(registry)
+
+
     override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long) {
         logger.warn("[$accountName] Submitting payment request for payment $paymentId")
 
@@ -67,22 +83,37 @@ class PaymentExternalSystemAdapterImpl(
             it.logSubmission(success = true, transactionId, now(), Duration.ofMillis(now() - paymentStartedAt))
         }
 
+        if (now() + requestAverageProcessingTime.toMillis() > deadline) {
+            paymentESService.update(paymentId) {
+                it.logProcessing(false, now(), transactionId, reason = "Request meets deadline")
+            }
+            return
+        }
 
         logger.info("[$accountName] Submit: $paymentId , txId: $transactionId")
+        var retryTime = 3
+        var retry = true
+        while (retry && retryTime > 0){
+            retryTime--
+            if (retryTime < 2) retryCounter.increment()
 
-        try {
-            rateLimiter.tickBlocking()
-            semaphore.acquire()
+            val startTime = System.currentTimeMillis()
+            try {
+                rateLimiter.tickBlocking()
+                semaphore.acquire()
 
-            val request = Request.Builder().run {
-                url("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount")
-                post(emptyBody)
-            }.build()
+                val request = Request.Builder().run {
+                    url("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount")
+                    post(emptyBody)
+                }.build()
 
-            var retry = true
-            var retryTime = 3
-            while (retry && retryTime > 0){
-                retryTime--
+                if (now() + requestAverageProcessingTime.toMillis() > deadline) {
+                    paymentESService.update(paymentId) {
+                        it.logProcessing(false, now(), transactionId, reason = "Request meets deadline")
+                    }
+                    return
+                }
+
                 client.newCall(request).execute().use { response ->
                     val body = try {
                         mapper.readValue(response.body?.string(), ExternalSysResponse::class.java)
@@ -109,29 +140,30 @@ class PaymentExternalSystemAdapterImpl(
                         retry = false
                     }
                 }
-            }
+            } catch (e: Exception) {
+                when (e) {
+                    is SocketTimeoutException -> {
+                        logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId", e)
+                        paymentESService.update(paymentId) {
+                            it.logProcessing(false, now(), transactionId, reason = "Request timeout.")
+                        }
+                    }
 
-        } catch (e: Exception) {
-            when (e) {
-                is SocketTimeoutException -> {
-                    logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId", e)
-                    paymentESService.update(paymentId) {
-                        it.logProcessing(false, now(), transactionId, reason = "Request timeout.")
+                    else -> {
+                        logger.error("[$accountName] Payment failed for txId: $transactionId, payment: $paymentId", e)
+
+                        paymentESService.update(paymentId) {
+                            it.logProcessing(false, now(), transactionId, reason = e.message)
+                        }
                     }
                 }
-
-                else -> {
-                    logger.error("[$accountName] Payment failed for txId: $transactionId, payment: $paymentId", e)
-
-                    paymentESService.update(paymentId) {
-                        it.logProcessing(false, now(), transactionId, reason = e.message)
-                    }
-                }
+                failCounter.increment()
+            } finally {
+                semaphore.release()
+                requestLatency.record(System.currentTimeMillis() - startTime, TimeUnit.MILLISECONDS)
             }
-            failCounter.increment()
-        } finally {
-            semaphore.release()
         }
+
     }
 
     override fun price() = properties.price
