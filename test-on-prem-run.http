@@ -10,8 +10,7 @@ Content-Type: application/json
   "accounts": "acc-9",
   "ratePerSecond": 100,
   "testCount": 5000,
-  "processingTimeMillis": 20000,
-  "onPremises": true
+  "processingTimeMillis": 20000
 }
 
 ### Stop running test to save credits
