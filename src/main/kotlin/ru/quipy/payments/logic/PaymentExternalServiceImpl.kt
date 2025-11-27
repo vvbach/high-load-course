@@ -15,6 +15,8 @@ import ru.quipy.payments.api.PaymentAggregate
 import java.net.SocketTimeoutException
 import java.time.Duration
 import java.util.*
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 
@@ -42,7 +44,7 @@ class PaymentExternalSystemAdapterImpl(
     private val parallelRequests = properties.parallelRequests
 
     private val client = OkHttpClient.Builder()
-        .callTimeout(Duration.ofMillis(requestAverageProcessingTime.toMillis() + 100))
+        .callTimeout(Duration.ofMillis(requestAverageProcessingTime.toMillis() * 2))
         .retryOnConnectionFailure(true)
         .build()
 
@@ -82,6 +84,8 @@ class PaymentExternalSystemAdapterImpl(
         paymentESService.update(paymentId) {
             it.logSubmission(success = true, transactionId, now(), Duration.ofMillis(now() - paymentStartedAt))
         }
+        logger.info("[$accountName] Submit: $paymentId , txId: $transactionId")
+
 
         if (now() + requestAverageProcessingTime.toMillis() > deadline) {
             paymentESService.update(paymentId) {
@@ -90,17 +94,19 @@ class PaymentExternalSystemAdapterImpl(
             return
         }
 
-        logger.info("[$accountName] Submit: $paymentId , txId: $transactionId")
-        var retryTime = 3
+
+        val totalRetryTime = 3
+        var retryTime = totalRetryTime
         var retry = true
         while (retry && retryTime > 0){
             retryTime--
-            if (retryTime < 2) retryCounter.increment()
+            if (retryTime < totalRetryTime - 1) retryCounter.increment()
 
+            rateLimiter.tickBlocking()
+            semaphore.acquire()
+            
             val startTime = System.currentTimeMillis()
             try {
-                rateLimiter.tickBlocking()
-                semaphore.acquire()
 
                 val request = Request.Builder().run {
                     url("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount")
@@ -163,7 +169,6 @@ class PaymentExternalSystemAdapterImpl(
                 requestLatency.record(System.currentTimeMillis() - startTime, TimeUnit.MILLISECONDS)
             }
         }
-
     }
 
     override fun price() = properties.price
