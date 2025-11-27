@@ -5,6 +5,7 @@ import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.Timer
 import io.micrometer.core.instrument.MeterRegistry
+import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
@@ -44,6 +45,13 @@ class PaymentExternalSystemAdapterImpl(
     private val parallelRequests = properties.parallelRequests
 
     private val client = OkHttpClient.Builder()
+        .connectionPool(
+            ConnectionPool(
+                maxIdleConnections = 1100,
+                keepAliveDuration = 10,
+                timeUnit = TimeUnit.SECONDS
+            )
+        )
         .callTimeout(Duration.ofMillis(requestAverageProcessingTime.toMillis() * 2))
         .retryOnConnectionFailure(true)
         .build()
@@ -104,7 +112,7 @@ class PaymentExternalSystemAdapterImpl(
 
             rateLimiter.tickBlocking()
             semaphore.acquire()
-            
+
             val startTime = System.currentTimeMillis()
             try {
 
