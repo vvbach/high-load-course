@@ -50,4 +50,10 @@ class TokenBucketRateLimiter(
             }
         }
     }
+
+    fun tickBlocking() {
+        while (!tick()) {
+            Thread.sleep(10)
+        }
+    }
 }
