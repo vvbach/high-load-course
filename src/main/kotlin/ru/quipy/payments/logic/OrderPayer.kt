@@ -42,7 +42,7 @@ class OrderPayer(
         .description("Total number of canceled payments")
         .register(registry)
 
-    private val queue = LinkedBlockingQueue<Runnable>(8000)
+    private val queue = LinkedBlockingQueue<Runnable>(1500)
 
     private val paymentExecutor = ThreadPoolExecutor(
         120,
