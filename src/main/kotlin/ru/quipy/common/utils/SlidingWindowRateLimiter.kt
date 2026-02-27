@@ -39,6 +39,15 @@ class SlidingWindowRateLimiter(
         }
     }
 
+    fun tickBlocking(timeout: Long): Boolean {
+        val end = System.currentTimeMillis() + timeout
+        while (System.currentTimeMillis() <= end) {
+            if (tick()) return true
+            Thread.sleep(10)
+        }
+        return false
+    }
+
     data class Measure(
         val value: Long,
         val timestamp: Long
