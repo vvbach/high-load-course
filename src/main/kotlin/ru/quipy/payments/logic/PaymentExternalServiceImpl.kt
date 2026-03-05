@@ -19,6 +19,7 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class PaymentExternalSystemAdapterImpl(
     private val properties: PaymentAccountProperties,
@@ -46,8 +47,11 @@ class PaymentExternalSystemAdapterImpl(
         .version(HttpClient.Version.HTTP_2)
         .build()
 
+    private val hedgeDelay = properties.averageProcessingTime.toMillis() / 2
 
     private val esExecutor = Executors.newFixedThreadPool(32)
+
+    private val hedgeScheduler = Executors.newScheduledThreadPool(64)
 
     private val successCounter = Counter.builder("payment.success")
         .register(Metrics.globalRegistry)
@@ -72,16 +76,27 @@ class PaymentExternalSystemAdapterImpl(
                 it.logSubmission(true, transactionId, now(), Duration.ofMillis(now() - paymentStartedAt))
             }
         }
+        val completed = AtomicBoolean(false)
 
+        process(paymentId, amount, transactionId, deadline, completed)
 
-        process(paymentId, amount, transactionId, deadline)
+        hedgeScheduler.schedule(
+            {
+                if (!completed.get()) {
+                    process(paymentId, amount, transactionId, deadline, completed)
+                }
+            },
+            hedgeDelay,
+            TimeUnit.MILLISECONDS
+        )
     }
 
     private fun process(
         paymentId: UUID,
         amount: Int,
         transactionId: UUID,
-        deadline: Long
+        deadline: Long,
+        completed: AtomicBoolean
     ) {
         val remaining = deadline - now()
 
@@ -126,6 +141,9 @@ class PaymentExternalSystemAdapterImpl(
                 latencyTimer.record(now() - startTime, TimeUnit.MILLISECONDS)
             }
             .thenAccept { response ->
+                if (!completed.compareAndSet(false, true)) {
+                    return@thenAccept
+                }
                 val body = try {
                     mapper.readValue(response.body(), ExternalSysResponse::class.java)
                 } catch (e: Exception) {
