@@ -46,7 +46,7 @@ class PaymentExternalSystemAdapterImpl(
     )
 
     private val httpClient = HttpClient.newBuilder()
-        .executor(Executors.newFixedThreadPool(100))
+        .executor(Executors.newFixedThreadPool(32))
         .version(HttpClient.Version.HTTP_2)
         .build()
 
@@ -111,12 +111,14 @@ class PaymentExternalSystemAdapterImpl(
             return
         }
 
-        if (!rateLimiter.tickBlocking(remaining)) {
+        val admissionWait = minOf(remaining, 20L)
+
+        if (!rateLimiter.tickBlocking(admissionWait)) {
             fail(paymentId, transactionId, "Rate limit exceeded")
             return
         }
 
-        if (!semaphore.tryAcquire(remaining, TimeUnit.MILLISECONDS)) {
+        if (!semaphore.tryAcquire(admissionWait, TimeUnit.MILLISECONDS)) {
             fail(paymentId, transactionId, "No capacity available")
             return
         }
