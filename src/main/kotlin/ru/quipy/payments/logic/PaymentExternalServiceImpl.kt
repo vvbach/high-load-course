@@ -2,6 +2,7 @@ package ru.quipy.payments.logic
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import io.github.resilience4j.circuitbreaker.CircuitBreaker
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry
 import io.micrometer.core.instrument.Counter
@@ -51,13 +52,13 @@ class PaymentExternalSystemAdapterImpl(
     private val circuitBreaker = CircuitBreakerRegistry.of(
         CircuitBreakerConfig.custom()
             .failureRateThreshold(50f)
-            .slowCallRateThreshold(50f)
-            .slowCallDurationThreshold(Duration.ofSeconds(3))
-            .minimumNumberOfCalls(100)
+            .slowCallRateThreshold(60f)
+            .slowCallDurationThreshold(Duration.ofSeconds(5))
+            .minimumNumberOfCalls(60)
             .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
-            .slidingWindowSize(200)
-            .waitDurationInOpenState(Duration.ofSeconds(10))
-            .permittedNumberOfCallsInHalfOpenState(3)
+            .slidingWindowSize(20)
+            .waitDurationInOpenState(Duration.ofSeconds(4))
+            .permittedNumberOfCallsInHalfOpenState(6)
             .recordExceptions(
                 java.io.IOException::class.java,
                 java.net.http.HttpTimeoutException::class.java,
