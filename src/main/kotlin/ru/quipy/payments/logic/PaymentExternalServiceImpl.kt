@@ -67,6 +67,8 @@ class PaymentExternalSystemAdapterImpl(
 
     private val esExecutor = Executors.newFixedThreadPool(16)
 
+    private val retryScheduler= Executors.newScheduledThreadPool(2)
+
     private val successCounter = Counter.builder("payment.success")
         .register(Metrics.globalRegistry)
 
@@ -100,14 +102,14 @@ class PaymentExternalSystemAdapterImpl(
         paymentId: UUID,
         amount: Int,
         transactionId: UUID,
-        deadline: Long
+        deadline: Long,
+        attempt: Int = 0
     ) {
         val remaining = deadline - now()
         if (remaining <= 0) {
             fail(paymentId, transactionId, "Deadline exceeded before admission")
             return
         }
-
 
         if (!rateLimiter.tickBlocking(remaining)) {
             fail(paymentId, transactionId, "Rate limit exceeded")
@@ -121,6 +123,23 @@ class PaymentExternalSystemAdapterImpl(
 
         if (!circuitBreaker.tryAcquirePermission()) {
             semaphore.release()
+
+            if (attempt < 1) {
+                val remainingAfterOpen = deadline - now()
+                if (remainingAfterOpen <= 0) {
+                    fail(paymentId, transactionId, "Deadline exceeded while waiting for circuit breaker retry")
+                    return
+                }
+
+                val delay = minOf(100, remainingAfterOpen)
+                retryScheduler.schedule(
+                    { process(paymentId, amount, transactionId, deadline, attempt + 1) },
+                    delay,
+                    TimeUnit.MILLISECONDS
+                )
+                return
+            }
+
             fail(paymentId, transactionId, "Circuit breaker is open")
             return
         }
