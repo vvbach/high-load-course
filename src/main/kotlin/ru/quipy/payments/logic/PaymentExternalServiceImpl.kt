@@ -54,8 +54,8 @@ class PaymentExternalSystemAdapterImpl(
             .slowCallRateThreshold(50f)
             .slowCallDurationThreshold(Duration.ofMillis(500))
             .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
-            .slidingWindowSize(10)
-            .waitDurationInOpenState(Duration.ofSeconds(2))
+            .slidingWindowSize(20)
+            .waitDurationInOpenState(Duration.ofSeconds(10))
             .permittedNumberOfCallsInHalfOpenState(3)
             .recordExceptions(
                 java.io.IOException::class.java,
@@ -108,14 +108,13 @@ class PaymentExternalSystemAdapterImpl(
             return
         }
 
-        val admissionWait = minOf(remaining, 20L)
 
-        if (!rateLimiter.tickBlocking(admissionWait)) {
+        if (!rateLimiter.tickBlocking(remaining)) {
             fail(paymentId, transactionId, "Rate limit exceeded")
             return
         }
 
-        if (!semaphore.tryAcquire(admissionWait, TimeUnit.MILLISECONDS)) {
+        if (!semaphore.tryAcquire(remaining, TimeUnit.MILLISECONDS)) {
             fail(paymentId, transactionId, "No capacity available")
             return
         }
