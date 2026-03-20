@@ -45,20 +45,18 @@ class PaymentExternalSystemAdapterImpl(
     )
 
     private val httpClient = HttpClient.newBuilder()
-        .executor(Executors.newFixedThreadPool(32))
         .version(HttpClient.Version.HTTP_2)
         .build()
 
     private val circuitBreaker = CircuitBreakerRegistry.of(
         CircuitBreakerConfig.custom()
             .failureRateThreshold(50f)
-            .slowCallRateThreshold(60f)
-            .slowCallDurationThreshold(Duration.ofSeconds(5))
-            .minimumNumberOfCalls(60)
+            .slowCallRateThreshold(50f)
+            .slowCallDurationThreshold(Duration.ofMillis(500))
             .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
-            .slidingWindowSize(20)
-            .waitDurationInOpenState(Duration.ofSeconds(4))
-            .permittedNumberOfCallsInHalfOpenState(6)
+            .slidingWindowSize(10)
+            .waitDurationInOpenState(Duration.ofSeconds(2))
+            .permittedNumberOfCallsInHalfOpenState(3)
             .recordExceptions(
                 java.io.IOException::class.java,
                 java.net.http.HttpTimeoutException::class.java,
@@ -67,7 +65,7 @@ class PaymentExternalSystemAdapterImpl(
             .build()
     ).circuitBreaker(properties.accountName)
 
-    private val esExecutor = Executors.newFixedThreadPool(32)
+    private val esExecutor = Executors.newFixedThreadPool(16)
 
     private val successCounter = Counter.builder("payment.success")
         .register(Metrics.globalRegistry)
