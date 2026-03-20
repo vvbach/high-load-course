@@ -2,7 +2,6 @@ package ru.quipy.payments.logic
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
-import io.github.resilience4j.circuitbreaker.CircuitBreaker
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry
 import io.micrometer.core.instrument.Counter
@@ -22,7 +21,6 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 
 class PaymentExternalSystemAdapterImpl(
     private val properties: PaymentAccountProperties,
@@ -54,11 +52,11 @@ class PaymentExternalSystemAdapterImpl(
         CircuitBreakerConfig.custom()
             .failureRateThreshold(50f)
             .slowCallRateThreshold(50f)
-            .slowCallDurationThreshold(Duration.ofMillis(500))
-            .minimumNumberOfCalls(10)
+            .slowCallDurationThreshold(Duration.ofSeconds(3))
+            .minimumNumberOfCalls(100)
             .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
-            .slidingWindowSize(20)
-            .waitDurationInOpenState(Duration.ofSeconds(2))
+            .slidingWindowSize(200)
+            .waitDurationInOpenState(Duration.ofSeconds(10))
             .permittedNumberOfCallsInHalfOpenState(3)
             .recordExceptions(
                 java.io.IOException::class.java,
